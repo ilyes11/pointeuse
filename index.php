@@ -196,7 +196,7 @@ td[title]{cursor:help}
 <body>
 <header>
   <h1>Suivi des présences</h1>
-  <small>Horaires <?php e(START_AM . '-' . END_AM . ' / ' . START_PM . '-' . END_PM); ?> · Mis à jour : <?php e(date('H:i:s')); ?> · Rafraîchissement auto chaque minute</small>
+  <small>Horaires <?php e(START_AM . '-' . END_AM . ' / ' . START_PM . '-' . END_PM); ?> · Dernière synchro : <?php e(date('Y-m-d H:i:s')); ?> · Auto-synchro chaque minute</small>
 </header>
 <main>
 <?php if ($error) { ?><div class="err"><?php e($error); ?></div><?php } ?>
@@ -205,13 +205,13 @@ td[title]{cursor:help}
   <div class="stat ok"><b><?php echo count($present); ?></b><span>Présents aujourd'hui</span></div>
   <div class="stat late"><b><?php echo $lateToday; ?></b><span>En retard aujourd'hui</span></div>
   <div class="stat abs"><b><?php echo count($absent); ?></b><span>Absents aujourd'hui</span></div>
-  <div class="stat"><b><?php echo count($names); ?></b><span>Élèves enregistrés</span></div>
+  <div class="stat"><b><?php echo count($names); ?></b><span>Employés enregistrés</span></div>
 </section>
 
 <form class="f" method="get">
   <label>Du <input type="date" name="from" value="<?php e($from); ?>"></label>
   <label>Au <input type="date" name="to" value="<?php e($to); ?>"></label>
-  <label>Élève
+  <label>Employé
     <select name="emp"><option value="">Tous</option>
       <?php foreach ($names as $id => $n) { ?><option value="<?php e($id); ?>"<?php if ($emp === (string)$id) echo ' selected'; ?>><?php e($n); ?></option><?php } ?>
     </select>
@@ -228,7 +228,7 @@ td[title]{cursor:help}
 <h2 class="print-title">Rapport de présence du <?php e($from); ?> au <?php e($to); ?><?php if ($emp !== '') { echo ' — '; e(isset($names[$emp]) ? $names[$emp] : $emp); } ?></h2>
 <div class="panel">
 <table>
-  <thead><tr><th>Date</th><th>Élève</th><th>Entrée matin</th><th>Sortie midi</th><th>Entrée ap-midi</th><th>Sortie soir</th><th>Durée</th><th>Pointages</th><th>Statut</th></tr></thead>
+  <thead><tr><th>Date</th><th>Employé</th><th>Entrée matin</th><th>Sortie midi</th><th>Entrée ap-midi</th><th>Sortie soir</th><th>Durée</th><th>Pointages</th><th>Statut</th></tr></thead>
   <tbody>
   <?php foreach ($rows as $r) { ?>
     <tr>
@@ -242,7 +242,7 @@ td[title]{cursor:help}
       <td><?php foreach ($r['tags'] as $tg) { ?><span class="tag<?php if ($tg[1]) echo ' l'; ?>"><?php e($tg[0]); ?></span><?php } ?></td>
     </tr>
   <?php } ?>
-  <?php if (!$rows) { ?><tr><td colspan="9">Aucun pointage sur cette période. Élargis les dates.</td></tr><?php } ?>
+  <?php if (!$rows) { ?><tr><td colspan="9">Aucun pointage sur cette période. Élargis les dates ou lance une synchronisation.</td></tr><?php } ?>
   </tbody>
 </table>
 </div>
