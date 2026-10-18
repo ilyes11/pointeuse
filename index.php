@@ -196,7 +196,7 @@ td[title]{cursor:help}
 <body>
 <header>
   <h1>Suivi des présences</h1>
-  <small>Horaires <?php e(START_AM . '-' . END_AM . ' / ' . START_PM . '-' . END_PM); ?> · Dernière synchro : <?php e(date('Y-m-d H:i:s')); ?> · Auto-synchro chaque minute</small>
+  <small>Horaires <?php e(START_AM . '-' . END_AM . ' / ' . START_PM . '-' . END_PM); ?> · Dernière synchro : <?php e(date('Y-m-d H:i:s')); ?></small>
 </header>
 <main>
 <?php if ($error) { ?><div class="err"><?php e($error); ?></div><?php } ?>
@@ -248,12 +248,5 @@ td[title]{cursor:help}
 </div>
 <p class="noprint" style="color:var(--muted)"><?php echo count($rows); ?> lignes · <?php echo $totalLate; ?> retards sur la période</p>
 </main>
-<script>
-setInterval(function () {
-  var t = document.activeElement ? document.activeElement.tagName : '';
-  if (t === 'INPUT' || t === 'SELECT') return;
-  location.reload();
-}, 60000);
-</script>
 </body>
 </html>
