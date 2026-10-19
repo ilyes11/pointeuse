@@ -23,7 +23,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {            // handshake / options
 $table = isset($_GET['table']) ? $_GET['table'] : '';
 if ($table !== 'ATTLOG') { echo 'OK'; exit; }
 
-$cache = array(); $failed = false; $count = 0;
+/* ---- Logique identique a pointe_elev.php (notifyNew), adaptee au mode "push" ---- */
+define('MAX_DELAY_MIN', 60);   // pointage plus vieux que 60 min : notification annulee
+define('SEEN_FILE', sys_get_temp_dir() . '/adms_seen.json');
+
+$now = time();
+$fp = fopen(SEEN_FILE . '.lock', 'c');
+if ($fp) flock($fp, LOCK_EX);                                   // evite les doublons si la pointeuse reessaie en parallele
+$seen = array();
+if (file_exists(SEEN_FILE)) { $j = json_decode(file_get_contents(SEEN_FILE), true); if (is_array($j)) $seen = $j; }
+
+$todo = array();
 foreach (preg_split('/\r?\n/', file_get_contents('php://input')) as $line) {
     if (trim($line) === '') continue;
     $f = explode("\t", trim($line));
@@ -31,39 +41,74 @@ foreach (preg_split('/\r?\n/', file_get_contents('php://input')) as $line) {
         error_log('ADMS PUNCH ignore (ligne invalide): ' . trim($line));
         continue;
     }
-    // ID recu de la pointeuse, logue meme s'il n'existe pas dans la base
-    error_log('ADMS PUNCH: ID=' . $f[0] . ' time=' . $f[1] . ' SN=' . $sn);
+    error_log('ADMS PUNCH: ID=' . $f[0] . ' time=' . $f[1] . ' SN=' . $sn);   // ID recu, meme absent de la base
     $ts = strtotime($f[1]);
-    if ($ts === false || $ts < time() - 86400) {               // ignore les pointages de plus de 24 h
-        error_log('ADMS PUNCH ignore (date invalide ou > 24h): ID=' . $f[0] . ' time=' . $f[1]);
+    if ($ts === false || $ts < $now - 86400) continue;           // ignore > 24 h
+    $k = $f[0] . '|' . $f[1];
+    if (isset($seen[$k])) continue;
+    if ($now - $ts > MAX_DELAY_MIN * 60) {                       // pointage trop ancien : on n'envoie rien
+        $seen[$k] = 1;
+        error_log('ADMS ANNULE (pointage vieux de ' . round(($now - $ts) / 60) . ' min) ID ' . $f[0] . ' ' . $f[1]);
         continue;
     }
+    $todo[$k] = array('id' => $f[0], 'timestamp' => $f[1]);
+}
+
+$failed = false; $count = 0;
+if ($todo) {
     try {
-        $pin = (int)$f[0];
-        if (!isset($cache[$pin])) {
-            $r = sb('GET', 'students?id_pointeuse=eq.' . $pin . '&select=id,first_name,last_name,parent_id&limit=1');
-            $cache[$pin] = (is_array($r) && count($r)) ? $r[0] : false;
+        /* Par paquets de 100 : 1 requete pour trouver les eleves + 1 requete pour inserer toutes les notifications.
+           Un paquet n'est marque "vu" qu'une fois insere => pas de doublons, pas de perte. */
+        $lastTs = array();
+        foreach (array_chunk(array_keys($todo), 100) as $chunk) {
+            $pins = array();
+            foreach ($chunk as $k) { $p = intval($todo[$k]['id']); if ($p > 0) $pins[$p] = 1; }
+            $stu = array();
+            if ($pins) {
+                $rows = sb('GET', 'students?id_pointeuse=in.(' . implode(',', array_keys($pins)) . ')&select=id,id_pointeuse,first_name,last_name,parent_id');
+                if (is_array($rows)) foreach ($rows as $r) $stu[intval($r['id_pointeuse'])] = $r;
+            }
+            $batch = array();
+            foreach ($chunk as $k) {
+                $a = $todo[$k];
+                $p = intval($a['id']);
+                if (!isset($stu[$p])) {
+                    error_log('ADMS PUNCH ID=' . $p . ' introuvable dans la base (students.id_pointeuse)');
+                    continue;
+                }
+                $t = strtotime($a['timestamp']);
+                if (isset($lastTs[$p]) && abs($t - $lastTs[$p]) < 120) continue;   // double pointage < 2 min : une seule notif
+                $lastTs[$p] = $t;
+                $r = $stu[$p];
+                // Eleve : un pointage = il quitte l'etablissement -> on previent le parent
+                $batch[] = array(
+                    'id'         => 'notif_' . substr(md5(uniqid(mt_rand(), true)), 0, 12),
+                    'parent_id'  => $r['parent_id'],
+                    'student_id' => $r['id'],
+                    'type'       => 'attendance',
+                    'title'      => 'مغادرة التلميذ',
+                    'body'       => 'التلميذ(ة) ' . $r['first_name'] . ' ' . $r['last_name'] . ' بصدد المغادرة، الرجاء الالتحاق به.',
+                    'is_read'    => false,
+                    'created_at' => gmdate('Y-m-d\TH:i:s\Z'),
+                );
+            }
+            if ($batch) sb('POST', 'notifications', $batch, 'return=minimal');
+            foreach ($chunk as $k) $seen[$k] = 1;
+            $count += count($batch);
+            if ($batch) error_log('ADMS OK ' . count($batch) . ' notification(s) envoyee(s)');
         }
-        $s = $cache[$pin];
-        if (!$s) {
-            error_log('ADMS PUNCH ID=' . $pin . ' introuvable dans la base (students.id_pointeuse)');
-            continue;
-        }
-        sb('POST', 'notifications', array(
-            'id'         => 'notif_' . substr(md5(uniqid(mt_rand(), true)), 0, 12),
-            'parent_id'  => $s['parent_id'],
-            'student_id' => $s['id'],
-            'type'       => 'attendance',
-            'title'      => 'تسجيل الحضور',
-            'body'       => 'ابنك/ابنتك ' . $s['first_name'] . ' ' . $s['last_name'] . ' قام/ت بتسجيل الدخول بنجاح.',
-            'is_read'    => false,
-            'created_at' => gmdate('Y-m-d\TH:i:s\Z'),
-        ), 'return=minimal');
-        $count++;
     } catch (Exception $e) {
-        error_log('ADMS: ' . $e->getMessage());
-        $failed = true;
+        error_log('ADMS ERREUR: ' . $e->getMessage());
+        $failed = true;                                           // les paquets non inseres ne sont pas marques "vus"
     }
 }
-if ($failed) { http_response_code(500); echo 'ERROR'; exit; }   // la pointeuse reessaiera
+
+foreach ($seen as $k => $v) {                                     // nettoyage > 48 h
+    $p = strpos($k, '|');
+    if ($p !== false && strtotime(substr($k, $p + 1)) < $now - 172800) unset($seen[$k]);
+}
+file_put_contents(SEEN_FILE, json_encode($seen));
+if ($fp) { flock($fp, LOCK_UN); fclose($fp); }
+
+if ($failed) { http_response_code(500); echo 'ERROR'; exit; }     // la pointeuse reessaiera
 echo 'OK: ' . $count;

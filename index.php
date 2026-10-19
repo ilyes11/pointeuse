@@ -7,12 +7,18 @@ define('START_AM', '08:00');   // entrée matin
 define('END_AM',   '12:00');   // sortie midi
 define('START_PM', '14:00');   // entrée après-midi
 define('END_PM',   '18:00');   // sortie soir
-define('TOLERANCE', 10);       // minutes de tolérance
-// IDs pointeuse (students.id_pointeuse) à afficher, séparés par des virgules. '' = tout le monde.
-define('ONLY_IDS', '101,102,103,104,105,106,107,108,1');
+define('TOLERANCE', 15);       // minutes de tolérance
+// IDs du département, séparés par des virgules (ex: '1,15,32'). '' = tout le monde.
+define('ONLY_IDS', '450,451,452,453,454,455,456,457,1,458,459,460,461,462,463');
 
 function h($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
 function e($s) { echo h($s); }
+
+/* 75 -> "1 h 15 min" ; 20 -> "20 min" */
+function fmtMin($m) {
+    $m = (int)round($m);
+    return $m >= 60 ? sprintf('%d h %02d min', floor($m / 60), $m % 60) : $m . ' min';
+}
 
 /* Lit toutes les lignes (Supabase limite à 1000 par requête). */
 function sbAll($path) {
@@ -106,8 +112,8 @@ foreach ($days as $d => $list) {
         if ($a['in2'] && $a['out2']) $mins += (strtotime($a['out2']) - strtotime($a['in2'])) / 60;
 
         $tags = array();
-        if ($late1) $tags[] = array('Retard matin', true);
-        if ($late2) $tags[] = array('Retard après-midi', true);
+        if ($late1) $tags[] = array('Retard de ' . fmtMin((strtotime($a['in1']) - strtotime(START_AM)) / 60) . ' (matin)', true);
+        if ($late2) $tags[] = array('Retard de ' . fmtMin((strtotime($a['in2']) - strtotime(START_PM)) / 60) . ' (après-midi)', true);
         if ($d < $today) {
             if (!$a['in1'] && !$a['out1']) $tags[] = array('Absent matin', true);
             if (!$a['in2'] && !$a['out2']) $tags[] = array('Absent après-midi', true);
