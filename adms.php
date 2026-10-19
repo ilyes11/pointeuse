@@ -7,6 +7,11 @@ header('Content-Type: text/plain');
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
 $sn = isset($_GET['SN']) ? $_GET['SN'] : '';
 
+// Log de CHAQUE requete de la pointeuse (visible dans les logs Render)
+error_log('ADMS REQ: ' . $_SERVER['REQUEST_METHOD'] . ' ' . $path . ' SN=' . $sn
+    . ' table=' . (isset($_GET['table']) ? $_GET['table'] : '-')
+    . ' ip=' . (isset($_SERVER['HTTP_X_FORWARDED_FOR']) ? $_SERVER['HTTP_X_FORWARDED_FOR'] : $_SERVER['REMOTE_ADDR']));
+
 if (strpos($path, 'getrequest') !== false) { echo 'OK'; exit; }
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {            // handshake / options
@@ -20,10 +25,19 @@ if ($table !== 'ATTLOG') { echo 'OK'; exit; }
 
 $cache = array(); $failed = false; $count = 0;
 foreach (preg_split('/\r?\n/', file_get_contents('php://input')) as $line) {
+    if (trim($line) === '') continue;
     $f = explode("\t", trim($line));
-    if (count($f) < 2 || !ctype_digit($f[0])) continue;
+    if (count($f) < 2 || !ctype_digit($f[0])) {
+        error_log('ADMS PUNCH ignore (ligne invalide): ' . trim($line));
+        continue;
+    }
+    // ID recu de la pointeuse, logue meme s'il n'existe pas dans la base
+    error_log('ADMS PUNCH: ID=' . $f[0] . ' time=' . $f[1] . ' SN=' . $sn);
     $ts = strtotime($f[1]);
-    if ($ts === false || $ts < time() - 86400) continue;      // ignore les pointages de plus de 24 h
+    if ($ts === false || $ts < time() - 86400) {               // ignore les pointages de plus de 24 h
+        error_log('ADMS PUNCH ignore (date invalide ou > 24h): ID=' . $f[0] . ' time=' . $f[1]);
+        continue;
+    }
     try {
         $pin = (int)$f[0];
         if (!isset($cache[$pin])) {
@@ -31,7 +45,10 @@ foreach (preg_split('/\r?\n/', file_get_contents('php://input')) as $line) {
             $cache[$pin] = (is_array($r) && count($r)) ? $r[0] : false;
         }
         $s = $cache[$pin];
-        if (!$s) continue;
+        if (!$s) {
+            error_log('ADMS PUNCH ID=' . $pin . ' introuvable dans la base (students.id_pointeuse)');
+            continue;
+        }
         sb('POST', 'notifications', array(
             'id'         => 'notif_' . substr(md5(uniqid(mt_rand(), true)), 0, 12),
             'parent_id'  => $s['parent_id'],
