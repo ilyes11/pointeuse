@@ -49,7 +49,7 @@ foreach (preg_split('/\r?\n/', file_get_contents('php://input')) as $line) {
     $ts = strtotime($f[1]);
     if ($ts === false || $ts < $now - 86400) continue;           // ignore > 24 h
     if (in_array((string)intval($f[0]), $empIds, true)) {        // employe : historique seulement, pas de notification parent
-        $empRows[] = array('pin' => intval($f[0]), 'device_time' => $f[1], 'received_at' => gmdate('Y-m-d\TH:i:s\Z'));
+        $empRows[] = array('pin' => intval($f[0]), 'device_time' => $f[1]);
         continue;
     }
     $k = $f[0] . '|' . $f[1];
@@ -65,9 +65,9 @@ foreach (preg_split('/\r?\n/', file_get_contents('php://input')) as $line) {
 $failed = false; $count = 0;
 if ($empRows) {
     try {
-        // unique (pin, device_time) : si la pointeuse renvoie le meme pointage, il est ignore
-        sb('POST', 'employee_punches?on_conflict=pin,device_time', $empRows, 'resolution=ignore-duplicates,return=minimal');
-        error_log('ADMS EMPLOYES OK ' . count($empRows) . ' pointage(s) enregistre(s)');
+        // fichier texte (pas de Supabase) ; un pointage deja present est ignore
+        $added = empLogAppend($empRows);
+        error_log('ADMS EMPLOYES OK ' . $added . ' pointage(s) ajoute(s) au fichier');
     } catch (Exception $e) {
         error_log('ADMS EMPLOYES ERREUR: ' . $e->getMessage());
         $failed = true;                                           // la pointeuse reessaiera

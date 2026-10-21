@@ -67,19 +67,21 @@ if ($to > $today) $to = $today;
 if ($from > $to) $from = $to;
 if ((strtotime($to) - strtotime($from)) > 92 * 86400) $from = date('Y-m-d', strtotime($to) - 92 * 86400);
 
-$error = null; $punches = array();
-try {
-    $a = rawurlencode($from . 'T00:00:00+01:00'); $b = rawurlencode($to . 'T23:59:59+01:00');
-    $punches = sbAll('employee_punches?received_at=gte.' . $a . '&received_at=lte.' . $b
-        . '&pin=in.(' . implode(',', array_map('intval', $ids)) . ')&select=pin,received_at&order=received_at.asc');
-} catch (Exception $ex) { $error = $ex->getMessage(); }
+/* Télécharger le fichier journal complet (sauvegarde) */
+if (isset($_GET['txt'])) {
+    $f = empLogPath();
+    header('Content-Type: text/plain; charset=utf-8');
+    header('Content-Disposition: attachment; filename="employee_punches.txt"');
+    if (is_file($f)) readfile($f);
+    exit;
+}
 
+$error = null;
+$logFile = empLogPath();
 /* $days[date][pin] = liste d'heures (heure de Tunis) */
 $days = array();
-foreach ($punches as $p) {
-    $d = new DateTime($p['received_at']);
-    $d->setTimezone(new DateTimeZone('Africa/Tunis'));
-    $days[$d->format('Y-m-d')][(string)$p['pin']][] = $d->format('H:i');
+foreach (empLogRead($from, $to) as $p) {
+    if (in_array($p['pin'], $ids, true)) $days[$p['date']][$p['pin']][] = $p['time'];
 }
 
 $lim1 = strtotime(START_AM) + TOLERANCE * 60;
@@ -209,6 +211,7 @@ td[title]{cursor:help}
   <button type="submit">Filtrer</button>
   <div class="tools">
     <a class="btn alt" href="?<?php e(http_build_query(array_merge($qs, array('csv' => 1)))); ?>">Exporter CSV</a>
+    <a class="btn alt" href="?txt=1" title="Sauvegarde du fichier journal complet">Télécharger le .txt</a>
     <button type="button" onclick="window.print()">Imprimer</button>
   </div>
 </form>
