@@ -33,6 +33,10 @@ if ($fp) flock($fp, LOCK_EX);                                   // evite les dou
 $seen = array();
 if (file_exists(SEEN_FILE)) { $j = json_decode(file_get_contents(SEEN_FILE), true); if (is_array($j)) $seen = $j; }
 
+require_once __DIR__ . '/employees_config.php';
+$empIds = empIdList();
+$empRows = array();
+
 $todo = array();
 foreach (preg_split('/\r?\n/', file_get_contents('php://input')) as $line) {
     if (trim($line) === '') continue;
@@ -44,6 +48,10 @@ foreach (preg_split('/\r?\n/', file_get_contents('php://input')) as $line) {
     error_log('ADMS PUNCH: ID=' . $f[0] . ' time=' . $f[1] . ' SN=' . $sn);   // ID recu, meme absent de la base
     $ts = strtotime($f[1]);
     if ($ts === false || $ts < $now - 86400) continue;           // ignore > 24 h
+    if (in_array((string)intval($f[0]), $empIds, true)) {        // employe : historique seulement, pas de notification parent
+        $empRows[] = array('pin' => intval($f[0]), 'device_time' => $f[1], 'received_at' => gmdate('Y-m-d\TH:i:s\Z'));
+        continue;
+    }
     $k = $f[0] . '|' . $f[1];
     if (isset($seen[$k])) continue;
     if ($now - $ts > MAX_DELAY_MIN * 60) {                       // pointage trop ancien : on n'envoie rien
@@ -55,6 +63,16 @@ foreach (preg_split('/\r?\n/', file_get_contents('php://input')) as $line) {
 }
 
 $failed = false; $count = 0;
+if ($empRows) {
+    try {
+        // unique (pin, device_time) : si la pointeuse renvoie le meme pointage, il est ignore
+        sb('POST', 'employee_punches?on_conflict=pin,device_time', $empRows, 'resolution=ignore-duplicates,return=minimal');
+        error_log('ADMS EMPLOYES OK ' . count($empRows) . ' pointage(s) enregistre(s)');
+    } catch (Exception $e) {
+        error_log('ADMS EMPLOYES ERREUR: ' . $e->getMessage());
+        $failed = true;                                           // la pointeuse reessaiera
+    }
+}
 if ($todo) {
     try {
         /* Par paquets de 100 : 1 requete pour trouver les eleves + 1 requete pour inserer toutes les notifications.
