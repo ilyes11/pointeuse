@@ -88,13 +88,14 @@ $lim1 = strtotime(START_AM) + TOLERANCE * 60;
 $lim2 = strtotime(START_PM) + TOLERANCE * 60;
 
 $rows = array(); $totalLate = 0; $totalAbs = 0;
+$trackStart = empLogFirstDate();   // avant le premier pointage enregistre on ne sait rien : pas d'absences
 for ($ts = strtotime($to); $ts >= strtotime($from); $ts -= 86400) {
     $d = date('Y-m-d', $ts);
     $isWork = in_array((int)date('N', $ts), $WORK_DAYS, true);
     foreach ($names as $id => $n) {
         if ($emp !== '' && $emp !== (string)$id) continue;
         $t = isset($days[$d][$id]) ? $days[$d][$id] : array();
-        if (!$t && (!$isWork || $d >= $today)) continue;          // jour non travaillé ou aujourd'hui (pas encore pointé)
+        if (!$t && (!$isWork || $d >= $today || $trackStart === null || $d < $trackStart)) continue;          // jour non travaillé ou aujourd'hui (pas encore pointé)
         $a = analyse($t);
         $tags = array(); $late = false;
         if (!$t) {

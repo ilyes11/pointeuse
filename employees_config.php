@@ -76,3 +76,17 @@ function empLogRead($from, $to) {
     fclose($fp);
     return $res;
 }
+
+/* Date du premier pointage enregistre (debut du suivi). null si le fichier est vide/absent. */
+function empLogFirstDate() {
+    $file = empLogPath();
+    if (!is_file($file)) return null;
+    $fp = fopen($file, 'r');
+    if (!$fp) return null;
+    $first = null;
+    while (($l = fgets($fp)) !== false) {
+        if (strlen($l) >= 10 && preg_match('/^\d{4}-\d{2}-\d{2}/', $l)) { $first = substr($l, 0, 10); break; }
+    }
+    fclose($fp);
+    return $first;
+}
