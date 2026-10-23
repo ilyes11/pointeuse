@@ -28,14 +28,6 @@ define('MAX_DELAY_MIN', 60);   // pointage plus vieux que 60 min : notification 
 define('SEEN_FILE', sys_get_temp_dir() . '/adms_seen.json');
 define('LAST_FILE', sys_get_temp_dir() . '/adms_last.json');   // dernier envoi par eleve (anti-doublon entre requetes)
 define('NOTIF_COOLDOWN_SEC', 600);   // un eleve : au plus 1 notification toutes les 10 min
-/* Plages de sortie (heure de Tunis, heure du SERVEUR : l'horloge de la pointeuse est decalee).
-   Hors de ces plages, un pointage d'eleve n'envoie aucune notification. A ajuster selon l'ecole. */
-$LEAVE_WINDOWS = array(array('11:00', '19:00'));
-function inLeaveWindow($windows) {
-    $hm = date('H:i');   // lib.php fixe Africa/Tunis
-    foreach ($windows as $w) { if ($hm >= $w[0] && $hm <= $w[1]) return true; }
-    return false;
-}
 
 $now = time();
 $fp = fopen(SEEN_FILE . '.lock', 'c');
@@ -56,11 +48,6 @@ foreach (preg_split('/\r?\n/', file_get_contents('php://input')) as $line) {
     if ($ts === false || $ts < $now - 86400) continue;           // ignore > 24 h
     $k =$f[0] . '|' . $f[1];
     if (isset($seen[$k])) continue;
-    if (!inLeaveWindow($LEAVE_WINDOWS)) {                        // hors plage de sortie : pas de notification
-        $seen[$k] = 1;
-        error_log('ADMS HORS PLAGE ID ' . $f[0] . ' ' . $f[1] . ' (heure serveur ' . date('H:i') . ') : aucune notification');
-        continue;
-    }
     if ($now - $ts > MAX_DELAY_MIN * 60) {                       // pointage trop ancien : on n'envoie rien
         $seen[$k] = 1;
         error_log('ADMS ANNULE (pointage vieux de ' . round(($now - $ts) / 60) . ' min) ID ' . $f[0] . ' ' . $f[1]);
