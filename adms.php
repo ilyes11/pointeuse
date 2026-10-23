@@ -15,7 +15,7 @@ error_log('ADMS REQ: ' . $_SERVER['REQUEST_METHOD'] . ' ' . $path . ' SN=' . $sn
 if (strpos($path, 'getrequest') !== false) { echo 'OK'; exit; }
 
 if ($_SERVER['REQUEST_METHOD'] === 'GET') {            // handshake / options
-    echo "GET OPTION FROM: $sn\nStamp=9999\nOpStamp=9999\nErrorDelay=30\nDelay=10\n"
+    echo "GET OPTION FROM: $sn\nStamp=9999\nOpStamp=9999\nErrorDelay=30\nDelay=10\nTimeZone=1\n"
        . "TransTimes=00:00;14:00\nTransInterval=1\nTransFlag=TransData AttLog\nRealtime=1\nEncrypt=0\n";
     exit;
 }
@@ -26,16 +26,22 @@ if ($table !== 'ATTLOG') { echo 'OK'; exit; }
 /* ---- Logique identique a pointe_elev.php (notifyNew), adaptee au mode "push" ---- */
 define('MAX_DELAY_MIN', 60);   // pointage plus vieux que 60 min : notification annulee
 define('SEEN_FILE', sys_get_temp_dir() . '/adms_seen.json');
+define('LAST_FILE', sys_get_temp_dir() . '/adms_last.json');   // dernier envoi par eleve (anti-doublon entre requetes)
+define('NOTIF_COOLDOWN_SEC', 600);   // un eleve : au plus 1 notification toutes les 10 min
+/* Plages de sortie (heure de Tunis, heure du SERVEUR : l'horloge de la pointeuse est decalee).
+   Hors de ces plages, un pointage d'eleve n'envoie aucune notification. A ajuster selon l'ecole. */
+$LEAVE_WINDOWS = array(array('11:00', '19:00'));
+function inLeaveWindow($windows) {
+    $hm = date('H:i');   // lib.php fixe Africa/Tunis
+    foreach ($windows as $w) { if ($hm >= $w[0] && $hm <= $w[1]) return true; }
+    return false;
+}
 
 $now = time();
 $fp = fopen(SEEN_FILE . '.lock', 'c');
 if ($fp) flock($fp, LOCK_EX);                                   // evite les doublons si la pointeuse reessaie en parallele
 $seen = array();
 if (file_exists(SEEN_FILE)) { $j = json_decode(file_get_contents(SEEN_FILE), true); if (is_array($j)) $seen = $j; }
-
-require_once __DIR__ . '/employees_config.php';
-$empIds = empIdList();
-$empRows = array();
 
 $todo = array();
 foreach (preg_split('/\r?\n/', file_get_contents('php://input')) as $line) {
@@ -48,12 +54,13 @@ foreach (preg_split('/\r?\n/', file_get_contents('php://input')) as $line) {
     error_log('ADMS PUNCH: ID=' . $f[0] . ' time=' . $f[1] . ' SN=' . $sn);   // ID recu, meme absent de la base
     $ts = strtotime($f[1]);
     if ($ts === false || $ts < $now - 86400) continue;           // ignore > 24 h
-    if (in_array((string)intval($f[0]), $empIds, true)) {        // employe : historique seulement, pas de notification parent
-        $empRows[] = array('pin' => intval($f[0]), 'device_time' => $f[1]);
+    $k =$f[0] . '|' . $f[1];
+    if (isset($seen[$k])) continue;
+    if (!inLeaveWindow($LEAVE_WINDOWS)) {                        // hors plage de sortie : pas de notification
+        $seen[$k] = 1;
+        error_log('ADMS HORS PLAGE ID ' . $f[0] . ' ' . $f[1] . ' (heure serveur ' . date('H:i') . ') : aucune notification');
         continue;
     }
-    $k = $f[0] . '|' . $f[1];
-    if (isset($seen[$k])) continue;
     if ($now - $ts > MAX_DELAY_MIN * 60) {                       // pointage trop ancien : on n'envoie rien
         $seen[$k] = 1;
         error_log('ADMS ANNULE (pointage vieux de ' . round(($now - $ts) / 60) . ' min) ID ' . $f[0] . ' ' . $f[1]);
@@ -63,21 +70,12 @@ foreach (preg_split('/\r?\n/', file_get_contents('php://input')) as $line) {
 }
 
 $failed = false; $count = 0;
-if ($empRows) {
-    try {
-        // fichier texte (pas de Supabase) ; un pointage deja present est ignore
-        $added = empLogAppend($empRows);
-        error_log('ADMS EMPLOYES OK ' . $added . ' pointage(s) ajoute(s) au fichier');
-    } catch (Exception $e) {
-        error_log('ADMS EMPLOYES ERREUR: ' . $e->getMessage());
-        $failed = true;                                           // la pointeuse reessaiera
-    }
-}
 if ($todo) {
     try {
         /* Par paquets de 100 : 1 requete pour trouver les eleves + 1 requete pour inserer toutes les notifications.
            Un paquet n'est marque "vu" qu'une fois insere => pas de doublons, pas de perte. */
-        $lastTs = array();
+        $last = array();
+        if (file_exists(LAST_FILE)) { $j = json_decode(file_get_contents(LAST_FILE), true); if (is_array($j)) $last = $j; }
         foreach (array_chunk(array_keys($todo), 100) as $chunk) {
             $pins = array();
             foreach ($chunk as $k) { $p = intval($todo[$k]['id']); if ($p > 0) $pins[$p] = 1; }
@@ -94,9 +92,11 @@ if ($todo) {
                     error_log('ADMS PUNCH ID=' . $p . ' introuvable dans la base (students.id_pointeuse)');
                     continue;
                 }
-                $t = strtotime($a['timestamp']);
-                if (isset($lastTs[$p]) && abs($t - $lastTs[$p]) < 120) continue;   // double pointage < 2 min : une seule notif
-                $lastTs[$p] = $t;
+                if (isset($last[$p]) && $now - $last[$p] < NOTIF_COOLDOWN_SEC) {   // deja notifie il y a < 10 min (meme entre requetes)
+                    error_log('ADMS DOUBLON ID ' . $p . ' ignore (derniere notif il y a ' . ($now - $last[$p]) . ' s)');
+                    continue;
+                }
+                $last[$p] = $now;
                 $r = $stu[$p];
                 // Eleve : un pointage = il quitte l'etablissement -> on previent le parent
                 $batch[] = array(
@@ -110,7 +110,10 @@ if ($todo) {
                     'created_at' => gmdate('Y-m-d\TH:i:s\Z'),
                 );
             }
-            if ($batch) sb('POST', 'notifications', $batch, 'return=minimal');
+            if ($batch) {
+                sb('POST', 'notifications', $batch, 'return=minimal');
+                file_put_contents(LAST_FILE, json_encode($last));    // enregistre seulement apres insertion reussie
+            }
             foreach ($chunk as $k) $seen[$k] = 1;
             $count += count($batch);
             if ($batch) error_log('ADMS OK ' . count($batch) . ' notification(s) envoyee(s)');
